@@ -30,33 +30,96 @@ On **Mage-OS** (and any Magento tree that contains those commits):
 - Core already exposes the dialect helpers; this module only needs to implement them on the Postgres adapter (`DB\Adapter\Pdo\Postgres`).
 - `MysqlCompat` is unnecessary once `Pdo\Mysql` has those methods — you can drop the `Pdo\Mysql` preference in `etc/di.xml`.
 
-You still install **this module** for the Postgres driver, declarative schema, installer `ConnectionFactory`, sequence `RETURNING` / `IDENTITY`, and related setup.
+You still install **this module** for the Postgres driver, declarative schema, installer `ConnectionFactory`, sequence `RETURNING` / `IDENTITY`, and related setup. A few installer/session patches listed below still apply.
 
 ### Until #321 is merged
 
-On stock Magento / current Mage-OS `main`, keep applying the patches in `patches/` (via `cweagans/composer-patches` or by using the PR branch). Those diffs are what PR 321 upstreams. `MysqlCompat` supplies the helper methods so MySQL still works with the same patches.
+On **raw Magento Open Source** and current Mage-OS `main`, you **must** apply the diffs in `patches/` (or check out the PR branch). Those files are the same changes as PR 321. `MysqlCompat` implements the new adapter methods so MySQL still works with those patches applied.
 
-Patches that **stay with this module** even after merge (they reference the adapter, not Magento SQL):
+## Using the patches (raw Magento, Mage-OS, Adobe)
 
-- `connectionfactory-postgres.patch`
-- `installer-cleanup-schema.patch`
-- `sequence-ddl-identity.patch`
-- `setup-pass-db-engine.patch` (if Mage-OS does not already pass `--db-engine`)
-- `batchsizemanagement-noop.patch`
-- `maxheaptablesizeprocessor-noop.patch`
-- `unique-checks-operations-executor.patch`
-- `show-variables-importexport-max-packet.patch`
-- `show-variables-fixture-autoincrement.patch`
+Patches are unified diffs against the **Magento 2 git tree** (`app/code/Magento/...`, `lib/internal/Magento/Framework/...`, `setup/src/...`) — the layout of [magento/magento2](https://github.com/magento/magento2) and [mage-os/mageos-magento2](https://github.com/mage-os/mageos-magento2). They are **not** written for split Composer packages (`vendor/magento/module-catalog/...`) unless you remap paths.
+
+### 1. Git Magento / Mage-OS clone (recommended today)
+
+From the Magento root, after this module is in `vendor/genaker/module-postgento` or `app/code/Morozov/PgCompat`:
+
+```bash
+# example: module in vendor
+PATCHDIR=vendor/genaker/module-postgento/patches
+for p in "$PATCHDIR"/*.patch; do
+  patch -p1 --forward --no-backup-if-mismatch < "$p" || echo "FAIL $p"
+done
+```
+
+Or register them with [`cweagans/composer-patches`](https://github.com/cweagans/composer-patches) on the metapackage name your root `composer.json` uses (`magento/magento2ce` or `mage-os/magento2ce`):
+
+```json
+{
+  "require": {
+    "cweagans/composer-patches": "^1.7"
+  },
+  "config": {
+    "allow-plugins": {
+      "cweagans/composer-patches": true
+    }
+  },
+  "extra": {
+    "composer-exit-on-patch-failure": true,
+    "patches": {
+      "magento/magento2ce": {
+        "Postgento: Select AdapterInterface typehint": "vendor/genaker/module-postgento/patches/select-adapterinterface-typehint.patch",
+        "Postgento: IFNULL eraser": "vendor/genaker/module-postgento/patches/ifnull-eraser-getifnullsql.patch"
+      }
+    }
+  }
+}
+```
+
+List **every** file in `patches/` the same way (one extra.patches entry per file). `composer install` / `composer update` applies them. Sample data uses a different package key:
+
+```json
+"magento/module-catalog-sample-data": {
+  "Postgento: skip options before attribute id": "vendor/genaker/module-postgento/patches/sampledata-empty-attribute-id.patch"
+}
+```
+
+### 2. Composer Magento (`magento/project-community-edition`)
+
+`composer create-project magento/project-community-edition` installs **split packages**. These patch files will not apply as-is (`app/code/Magento/Catalog/...` vs `vendor/magento/module-catalog/...`). Options:
+
+- Develop against a **git** Magento/Mage-OS checkout (above), or
+- Wait for Mage-OS #321 (then you only need the **module-only** patches, still git-path), or
+- Re-root each hunk onto `vendor/magento/module-*` / `vendor/magento/framework` / `vendor/magento/framework-setup` yourself.
+
+### 3. After #321 is in your core — keep only module patches
+
+Skip the SQL call-site patches (IFNULL, GROUP_CONCAT, backticks, UNION casts, FIELD(), temp table, etc.). Still apply patches that talk to this module / Postgres setup:
+
+| Patch | Why it stays |
+|---|---|
+| `connectionfactory-postgres.patch` | Setup CLI opens `pdo_pgsql` |
+| `installer-cleanup-schema.patch` | `--cleanup-database` → `DROP SCHEMA public` |
+| `sequence-ddl-identity.patch` | Sales sequence `IDENTITY` vs `AUTO_INCREMENT` |
+| `setup-pass-db-engine.patch` | Pass `--db-engine` into DB validator |
+| `batchsizemanagement-noop.patch` | No `max_heap_table_size` on Postgres |
+| `maxheaptablesizeprocessor-noop.patch` | Same |
+| `unique-checks-operations-executor.patch` | No `UNIQUE_CHECKS` on Postgres |
+| `show-variables-importexport-max-packet.patch` | No `max_allowed_packet` |
+| `show-variables-fixture-autoincrement.patch` | No `auto_increment_increment` |
+
+If a hunk is already in core (e.g. Mage-OS merged `setup-pass-db-engine`), skip that file.
 
 ## Install
+
+PHP: `pdo_pgsql` (and `pdo_mysql` if you still run MySQL). Postgres 16 is what we test. OpenSearch/Elasticsearch is still Magento’s catalog search until you replace it (e.g. ParadeDB).
 
 ```bash
 composer require genaker/module-postgento
 bin/magento module:enable Morozov_PgCompat
-bin/magento setup:upgrade
 ```
 
-Until the package is on Packagist, require the GitHub repo:
+Until Packagist:
 
 ```json
 {
@@ -70,20 +133,30 @@ Until the package is on Packagist, require the GitHub repo:
 composer require genaker/module-postgento:dev-main
 ```
 
-PHP needs `pdo_pgsql`. Install Magento with:
+You can also copy this repo to `app/code/Morozov/PgCompat` (no Composer package). Apply patches **before** `setup:install` on a raw Magento tree.
+
+Postgres install (empty database; `model` stays `mysql4`):
 
 ```bash
-bin/magento setup:install --db-engine=postgresql --db-host=postgres ...
+bin/magento setup:install \
+  --db-engine=postgresql \
+  --db-host=127.0.0.1 \
+  --db-name=magento \
+  --db-user=magento \
+  --db-password=magento \
+  --backend-frontname=admin \
+  --search-engine=opensearch \
+  ...
 ```
 
-`model` stays `mysql4`. MySQL remains `--db-engine=mysql`.
+MySQL: `--db-engine=mysql`. Then `bin/magento indexer:reindex` and `bin/magento cache:flush`.
+
+Failed Postgres statements: `var/log/sqltopostgres.log`.
 
 ## Architecture (short)
 
 - `postgresql` / `postgres` / `pgsql` → `DB\Postgres` → `DB\Adapter\Pdo\Postgres` (`Zend_Db_Adapter_Pdo_Pgsql`). Does not extend Magento’s MySQL adapter.
 - `mysql` → Magento `Pdo\Mysql` (or `MysqlCompat` until #321 lands).
-
-Failed statements that reach Postgres are logged to `var/log/sqltopostgres.log`.
 
 ## Tests
 
