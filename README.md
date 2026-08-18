@@ -1,6 +1,6 @@
 # Postgento (`Morozov_PgCompat`)
 
-PostgreSQL adapter for Magento Open Source / [Mage-OS](https://github.com/mage-os/mageos-magento2). Magento still runs on MySQL by default; this module adds a native Postgres engine selected from `env.php` (`db/connection/default/engine`).
+This is a fork of Kirill Morozov’s Magento PostgreSQL compatibility module (`Morozov_PgCompat`). It is a PostgreSQL adapter for Magento Open Source / [Mage-OS](https://github.com/mage-os/mageos-magento2). Magento still runs on MySQL by default; this module adds a native Postgres engine selected from `env.php` (`db/connection/default/engine`).
 
 ## Mage-OS core PR (required for Magento SQL)
 
