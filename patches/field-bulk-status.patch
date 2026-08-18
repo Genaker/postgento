@@ -1,0 +1,13 @@
+--- a/app/code/Magento/AsynchronousOperations/Model/BulkStatus.php
++++ b/app/code/Magento/AsynchronousOperations/Model/BulkStatus.php
+@@ -126,8 +126,10 @@
+             OperationInterface::STATUS_TYPE_COMPLETE
+         ];
+         $select = $collection->getSelect();
+-        $select->columns(['status' => $this->calculatedStatusSql->get($operationTableName)])
+-            ->order(new \Zend_Db_Expr('FIELD(status, ' . implode(',', $statusesArray) . ')'));
++        $statusExpr = $this->calculatedStatusSql->get($operationTableName);
++        $select->columns(['status' => $statusExpr])
++            ->order($select->getAdapter()->getFieldSql((string) $statusExpr, $statusesArray));
+         $collection->addFieldToFilter('user_id', $userId)
+             ->addOrder('start_time');

@@ -1,0 +1,37 @@
+--- a/setup/src/Magento/Setup/Module/ConnectionFactory.php
++++ b/setup/src/Magento/Setup/Module/ConnectionFactory.php
+@@ -36,7 +36,13 @@
+      */
+     public function create(array $connectionConfig)
+     {
+-        $quote = new \Magento\Framework\DB\Platform\Quote();
++        $isPostgres = \Morozov\PgCompat\DB\DbEngine::isPostgres($connectionConfig);
++        // Setup CLI builds Select by hand (no app di.xml). Quote must match the
++        // adapter this factory actually opens.
++        $quote = $isPostgres
++            ? new \Morozov\PgCompat\DB\PostgresQuote()
++            : new \Magento\Framework\DB\Platform\Quote();
+         $selectFactory = new \Magento\Framework\DB\SelectFactory(
+             new \Magento\Framework\DB\Select\SelectRenderer(
+                 [
+@@ -94,8 +100,23 @@
+             )
+         );
+         $objectManagerProvider = $this->serviceLocator->get(\Magento\Setup\Model\ObjectManagerProvider::class);
+-        $mysqlFactory = new \Magento\Framework\DB\Adapter\Pdo\MysqlFactory($objectManagerProvider->get());
+-        $resourceInstance = new Mysql($connectionConfig, $mysqlFactory);
++        $objectManager = $objectManagerProvider->get();
++        if ($isPostgres) {
++            $resourceInstance = new \Morozov\PgCompat\DB\Postgres(
++                $connectionConfig,
++                new \Morozov\PgCompat\DB\Adapter\Pdo\PostgresFactory($objectManager)
++            );
++        } else {
++            $resourceInstance = new Mysql(
++                \Morozov\PgCompat\DB\DbEngine::mysqlAdapterConfig($connectionConfig),
++                new \Magento\Framework\DB\Adapter\Pdo\MysqlFactory($objectManager)
++            );
++        }
+         return $resourceInstance->getConnection(
+             $this->serviceLocator->get(\Magento\Framework\DB\Logger\Quiet::class),
+             $selectFactory

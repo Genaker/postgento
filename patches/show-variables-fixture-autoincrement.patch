@@ -1,0 +1,19 @@
+--- a/setup/src/Magento/Setup/Model/FixtureGenerator/AutoIncrement.php
++++ b/setup/src/Magento/Setup/Model/FixtureGenerator/AutoIncrement.php
+@@ -37,8 +37,14 @@
+     public function getIncrement()
+     {
+         if ($this->incrementValue === null) {
+-            $increment = $this->resource->getConnection()->fetchRow('SHOW VARIABLES LIKE "auto_increment_increment"');
+-            $this->incrementValue = !empty($increment['Value']) ? (int)$increment['Value'] : 1;
++            $connection = $this->resource->getConnection();
++            if ($connection instanceof \Morozov\PgCompat\DB\Adapter\PostgresAdapterInterface) {
++                // PgCompat: identity columns increment by 1; no auto_increment_increment.
++                $this->incrementValue = 1;
++            } else {
++                $increment = $connection->fetchRow('SHOW VARIABLES LIKE "auto_increment_increment"');
++                $this->incrementValue = !empty($increment['Value']) ? (int)$increment['Value'] : 1;
++            }
+         }
+         return $this->incrementValue;
+     }

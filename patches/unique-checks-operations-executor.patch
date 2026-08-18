@@ -1,0 +1,39 @@
+--- a/lib/internal/Magento/Framework/Setup/Declaration/Schema/OperationsExecutor.php
++++ b/lib/internal/Magento/Framework/Setup/Declaration/Schema/OperationsExecutor.php
+@@ -16,6 +16,7 @@
+ use Magento\Framework\Setup\Declaration\Schema\Operations\AddColumn;
+ use Magento\Framework\Setup\Declaration\Schema\Operations\CreateTable;
+ use Magento\Framework\Setup\Declaration\Schema\Operations\ReCreateTable;
++use Morozov\PgCompat\DB\Adapter\PostgresAdapterInterface;
+ 
+ /**
+  * Schema operations executor.
+@@ -135,7 +136,16 @@
+             $connection = $this->resourceConnection->getConnection($resource);
+ 
+             $connection->startSetup();
+-            $connection->query('SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0');
++            // PgCompat: UNIQUE_CHECKS toggling is a MySQL bulk-schema-change
++            // optimization with no Postgres equivalent (Postgres always fully
++            // enforces uniqueness - there is no "disable and re-verify later" mode).
++            // Skipped outright for the Postgres adapter instead of translating it,
++            // since there is no runtime SQL-text rewriting to turn this into a
++            // harmless no-op and it would otherwise fail schema install outright on
++            // this exact statement.
++            if (!$connection instanceof PostgresAdapterInterface) {
++                $connection->query('SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0');
++            }
+         }
+     }
+ 
+@@ -150,7 +160,9 @@
+         foreach ($this->sharding->getResources() as $resource) {
+             $connection = $this->resourceConnection->getConnection($resource);
+ 
+-            $connection->query('SET UNIQUE_CHECKS=IF(@OLD_UNIQUE_CHECKS=0, 0, 1)');
++            if (!$connection instanceof PostgresAdapterInterface) {
++                $connection->query('SET UNIQUE_CHECKS=IF(@OLD_UNIQUE_CHECKS=0, 0, 1)');
++            }
+             $connection->endSetup();
+         }
+     }

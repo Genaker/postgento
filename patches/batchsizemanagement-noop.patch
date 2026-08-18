@@ -1,0 +1,17 @@
+--- a/lib/internal/Magento/Framework/Indexer/BatchSizeManagement.php
++++ b/lib/internal/Magento/Framework/Indexer/BatchSizeManagement.php
+@@ -39,6 +39,14 @@
+      */
+     public function ensureBatchSize(\Magento\Framework\DB\Adapter\AdapterInterface $connection, $batchSize)
+     {
++        // PgCompat: max_heap_table_size/tmp_table_size/innodb_buffer_pool_size are
++        // MySQL-only MEMORY-storage-engine tuning variables with no Postgres equivalent
++        // concept - not just unsupported syntax, there is nothing to size or set. A
++        // no-op here is correct behavior for the Postgres adapter, not a workaround.
++        if ($connection instanceof \Morozov\PgCompat\DB\Adapter\PostgresAdapterInterface) {
++            return;
++        }
++
+         $rowMemory = $this->rowSizeEstimator->estimateRowSize();
+ 
+         $maxHeapTableSize = $connection->fetchOne('SELECT @@max_heap_table_size;');

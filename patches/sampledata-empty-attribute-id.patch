@@ -1,0 +1,27 @@
+--- a/Model/Attribute.php
++++ b/Model/Attribute.php
+@@ -173,12 +173,19 @@
+         $result = [];
+         $data['option'] = explode("\n", $data['option'] ?? '');
+         /** @var \Magento\Eav\Model\ResourceModel\Entity\Attribute\Option\Collection $options */
+-        $options = $this->attrOptionCollectionFactory->create()
+-            ->setAttributeFilter($attribute->getId())
+-            ->setPositionOrder('asc', true)
+-            ->load();
++        // PgCompat: getOption() runs before $attribute->save() in install() above, so
++        // getId() is empty here - querying "attribute_id = ''" is a MySQL-tolerated
++        // (coerced to 0, matches nothing) no-op there, but Postgres rejects the
++        // comparison outright. An attribute with no id has no existing options either
++        // way, so skip the query and treat it the same as an empty collection.
++        $options = $attribute->getId()
++            ? $this->attrOptionCollectionFactory->create()
++                ->setAttributeFilter($attribute->getId())
++                ->setPositionOrder('asc', true)
++                ->load()
++            : null;
+         foreach ($data['option'] as $value) {
+-            if (!$options->getItemByColumnValue('value', $value)) {
++            if (!$options || !$options->getItemByColumnValue('value', $value)) {
+                 $result[] = trim($value);
+             }
+         }

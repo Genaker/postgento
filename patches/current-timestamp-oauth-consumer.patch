@@ -1,0 +1,13 @@
+--- a/app/code/Magento/Integration/Model/ResourceModel/Oauth/Consumer.php
++++ b/app/code/Magento/Integration/Model/ResourceModel/Oauth/Consumer.php
+@@ -68,7 +68,9 @@
+         $select = $connection->select()
+             ->from($this->getMainTable())
+             ->reset(\Magento\Framework\DB\Select::COLUMNS)
+-            ->columns(new \Zend_Db_Expr('CURRENT_TIMESTAMP() - created_at'))
++            // PgCompat: CURRENT_TIMESTAMP is a reserved keyword, not a function - MySQL
++            // tolerates the empty-parens call form, Postgres rejects it.
++            ->columns(new \Zend_Db_Expr('CURRENT_TIMESTAMP - created_at'))
+             ->where('entity_id = ?', $consumerId);
+ 
+         return $connection->fetchOne($select);

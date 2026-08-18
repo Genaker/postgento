@@ -1,0 +1,55 @@
+--- a/app/code/Magento/Bundle/Model/ResourceModel/Indexer/Price.php
++++ b/app/code/Magento/Bundle/Model/ResourceModel/Indexer/Price.php
+@@ -720,39 +720,24 @@
+             []
+         );
+         $select->where('si.stock_status = ?', Stock::STOCK_IN_STOCK);
+-        $query = str_replace('AS `idx`', 'AS `idx` USE INDEX (PRIMARY)', (string) $select);
+-        $insertColumns = [
+-            'entity_id',
+-            'customer_group_id',
+-            'website_id',
+-            'option_id',
+-            'selection_id',
+-            'group_type',
+-            'is_required',
+-            'price',
+-            'tier_price'
+-        ];
+-        $insertColumns = array_map(function ($item) use ($connection) {
+-            return $connection->quoteIdentifier($item);
+-        }, $insertColumns);
+-        $updateValues = [];
+-        foreach ($insertColumns as $column) {
+-            $updateValues[] = sprintf("%s = VALUES(%s)", $column, $column);
+-        }
+-
+-        $connection->query(sprintf(
+-            "INSERT INTO `" . $this->getBundleSelectionTable() . "` (%s) %s ON DUPLICATE KEY UPDATE %s",
+-            implode(",", $insertColumns),
+-            $query,
+-            implode(",", $updateValues)
+-        ));
++        // PgCompat: insertFromSelect(..., INSERT_ON_DUPLICATE) builds ON CONFLICT.
++        // Drops MySQL-only USE INDEX and raw ON DUPLICATE KEY UPDATE text.
++        $connection->query(
++            $connection->insertFromSelect(
++                $select,
++                $this->getBundleSelectionTable(),
++                [
++                    'entity_id',
++                    'customer_group_id',
++                    'website_id',
++                    'option_id',
++                    'selection_id',
++                    'group_type',
++                    'is_required',
++                    'price',
++                    'tier_price',
++                ],
++                \Magento\Framework\DB\Adapter\AdapterInterface::INSERT_ON_DUPLICATE
++            )
++        );
+     }
+ 
+     /**

@@ -1,0 +1,183 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <preference for="Magento\Framework\App\ResourceConnection\ConnectionAdapterInterface"
+                type="Morozov\PgCompat\DB\ConnectionAdapter"/>
+    <preference for="Magento\Framework\DB\Adapter\Pdo\Mysql"
+                type="Morozov\PgCompat\DB\Adapter\Pdo\MysqlCompat"/>
+    <preference for="Magento\Framework\DB\Platform\Quote" type="Morozov\PgCompat\DB\PostgresQuote"/>
+    <preference for="Magento\Framework\Setup\Declaration\Schema\Db\DbSchemaWriterInterface"
+                type="Morozov\PgCompat\DB\Setup\DelegatingDbSchemaWriter"/>
+    <preference for="Magento\Framework\Setup\Declaration\Schema\Db\DbSchemaReaderInterface"
+                type="Morozov\PgCompat\DB\Setup\DelegatingDbSchemaReader"/>
+    <preference for="Magento\Framework\Setup\Declaration\Schema\Db\DefinitionAggregator"
+                type="Morozov\PgCompat\DB\Setup\DefinitionAggregator"/>
+    <preference for="Magento\Framework\DB\Adapter\SqlVersionProvider"
+                type="Morozov\PgCompat\DB\SqlVersionProvider"/>
+    <preference for="Magento\SalesSequence\Model\Sequence" type="Morozov\PgCompat\DB\Model\Sequence"/>
+    <preference for="Magento\Framework\Lock\Backend\Database" type="Magento\Framework\Lock\Backend\Cache"/>
+    <preference for="Magento\AsynchronousOperations\Model\BulkStatus\CalculatedStatusSql"
+                type="Morozov\PgCompat\Compat\AsynchronousOperations\Model\BulkStatus\CalculatedStatusSql"/>
+
+    <!--
+        Dedicated log channel, separate from system.log/exception.log: every query that
+        fails once it reaches Postgres is a candidate translation gap (a Tier-1/Tier-2 fix
+        that doesn't exist yet, or exists but doesn't match this query's shape) and needs
+        to be reviewable on its own, not buried in general framework noise. Scoped to each
+        Postgres adapter provider's "sqlLogger" constructor argument only (see below) -
+        this does not touch the global LoggerInterface preference or any other class's
+        logging.
+    -->
+    <virtualType name="Morozov\PgCompat\Logger\Handler" type="Magento\Framework\Logger\Handler\Base">
+        <arguments>
+            <argument name="fileName" xsi:type="string">var/log/sqltopostgres.log</argument>
+        </arguments>
+    </virtualType>
+    <virtualType name="Morozov\PgCompat\Logger\Logger" type="Magento\Framework\Logger\Monolog">
+        <arguments>
+            <argument name="name" xsi:type="string">sqltopostgres</argument>
+            <argument name="handlers" xsi:type="array">
+                <item name="default" xsi:type="object">Morozov\PgCompat\Logger\Handler</item>
+            </argument>
+        </arguments>
+    </virtualType>
+    <type name="Morozov\PgCompat\DB\Adapter\Pdo\Postgres">
+        <arguments>
+            <argument name="sqlLogger" xsi:type="object">Morozov\PgCompat\Logger\Logger</argument>
+        </arguments>
+    </type>
+
+    <!--
+        Root-cause (Tier 1) fixes for MySQL's non-ONLY_FULL_GROUP_BY leniency, applied
+        at the actual query-building source via Magento's own DI array-composite
+        extension points - not class preferences, so nothing else that consumes these
+        interfaces is affected. Each replaces exactly one named array entry.
+    -->
+    <type name="Magento\CatalogInventory\Model\ResourceModel\Indexer\Stock\GetStatusExpression">
+        <arguments>
+            <argument name="statusExpressions" xsi:type="array">
+                <item name="default" xsi:type="object">Morozov\PgCompat\Compat\CatalogInventory\GroupBySafeDefaultExpression</item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="Magento\CatalogInventory\Model\ResourceModel\Indexer\Stock\QueryProcessorComposite">
+        <arguments>
+            <argument name="queryProcessors" xsi:type="array">
+                <item name="groupBySafeStockStatus" xsi:type="object">Morozov\PgCompat\Compat\CatalogInventory\GroupBySafeStockStatusQueryProcessor</item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="Magento\Catalog\Model\ResourceModel\Product\Indexer\Price\PriceInterface">
+        <arguments>
+            <argument name="priceModifiers" xsi:type="array">
+                <item name="inventoryProductPriceIndexFilter" xsi:type="object">Morozov\PgCompat\Compat\CatalogInventory\GroupBySafeProductPriceIndexFilter</item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="Magento\Catalog\Model\ResourceModel\Product\Indexer\Price\BasePriceModifier">
+        <arguments>
+            <argument name="priceModifiers" xsi:type="array">
+                <item name="inventoryProductPriceIndexFilter" xsi:type="object">Morozov\PgCompat\Compat\CatalogInventory\GroupBySafeProductPriceIndexFilter</item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="Magento\SalesRule\Model\ResourceModel\Rule">
+        <plugin name="pgCompatGroupBySafeActiveAttributes" type="Morozov\PgCompat\Compat\SalesRule\ActiveAttributesGroupByPlugin"/>
+    </type>
+    <type name="Magento\ConfigurableProduct\Model\ResourceModel\Product\Type\Configurable\Product\Collection">
+        <plugin name="pgCompatGroupedSelectAggregates"
+                type="Morozov\PgCompat\Compat\Catalog\GroupedSelectAggregatePlugin"
+                sortOrder="100"/>
+    </type>
+
+    <!--
+        Declarative schema (setup:upgrade) column DDL, generated natively instead of
+        rendering MySQL syntax for MysqlToPostgres::translateFragment() to regex-translate
+        downstream. Each item overrides exactly one key of DefinitionAggregator's
+        definitionProcessors array (declared in app/etc/di.xml, itself framework-level
+        bootstrap config, not a module - Magento's DI array-argument merging overrides by
+        key regardless of which file introduced it, so this needs no core patch).
+
+        datetime/timestamp/index/unique/primary/constraint/reference are deliberately
+        re-pointed at their original MySQL classes rather than left unlisted: Magento's
+        primordial app/etc/di.xml (framework bootstrap config, not a module) declares
+        this same argument, and overriding it here REPLACES the whole array rather than
+        deep-merging by key - confirmed by a live "Cannot process definition to array for
+        type constraint" failure the first time this was tried with those keys omitted.
+        Every key the base declaration has must be present here or nothing using it works.
+        Translation for these 7 stays regex-based (MysqlToPostgres::translateFragment())
+        rather than native, since it's purely syntactic keyword substitution already
+        proven correct, not a type-mapping decision:
+          - datetime/timestamp: default-value handling (CURRENT_TIMESTAMP, epoch
+            sentinel, NULL) has enough MySQL-specific edge cases that reusing the
+            already-tested regex path is lower risk than re-deriving them natively.
+          - index: "INDEX name (cols)" has no dialect-specific type keyword to begin
+            with; MysqlToPostgres::indexToCreateSql() already parses that exact shape
+            into a native CREATE INDEX statement regardless of which processor wrote it.
+          - unique/primary/constraint/reference: "UNIQUE KEY"->"UNIQUE" and
+            "CONSTRAINT PRIMARY KEY"->"PRIMARY KEY" are simple keyword replacements
+            translateFragment() already applies unconditionally.
+    -->
+    <type name="Morozov\PgCompat\DB\Setup\DefinitionAggregator">
+        <arguments>
+            <argument name="mysqlProcessors" xsi:type="array">
+                <item name="boolean" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Boolean</item>
+                <item name="int" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Integer</item>
+                <item name="smallint" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Integer</item>
+                <item name="tinyint" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Integer</item>
+                <item name="bigint" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Integer</item>
+                <item name="decimal" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Real</item>
+                <item name="float" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Real</item>
+                <item name="double" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Real</item>
+                <item name="text" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Blob</item>
+                <item name="blob" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Blob</item>
+                <item name="mediumblob" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Blob</item>
+                <item name="longblob" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Blob</item>
+                <item name="mediumtext" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Blob</item>
+                <item name="longtext" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Blob</item>
+                <item name="datetime" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Timestamp</item>
+                <item name="date" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Date</item>
+                <item name="timestamp" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Timestamp</item>
+                <item name="char" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\StringBinary</item>
+                <item name="varchar" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\StringBinary</item>
+                <item name="binary" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\StringBinary</item>
+                <item name="varbinary" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\StringBinary</item>
+                <item name="json" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Json</item>
+                <item name="index" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Index</item>
+                <item name="unique" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Constraints\Internal</item>
+                <item name="primary" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Constraints\Internal</item>
+                <item name="constraint" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Constraints\Internal</item>
+                <item name="reference" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Constraints\ForeignKey</item>
+            </argument>
+            <argument name="postgresProcessors" xsi:type="array">
+                <item name="boolean" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Boolean</item>
+                <item name="int" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Integer</item>
+                <item name="smallint" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Integer</item>
+                <item name="tinyint" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Integer</item>
+                <item name="bigint" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Integer</item>
+                <item name="decimal" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Real</item>
+                <item name="float" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Real</item>
+                <item name="double" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Real</item>
+                <item name="text" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Blob</item>
+                <item name="blob" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Blob</item>
+                <item name="mediumblob" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Blob</item>
+                <item name="longblob" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Blob</item>
+                <item name="mediumtext" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Blob</item>
+                <item name="longtext" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Blob</item>
+                <item name="date" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Date</item>
+                <item name="char" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\StringBinary</item>
+                <item name="varchar" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\StringBinary</item>
+                <item name="binary" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\StringBinary</item>
+                <item name="varbinary" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\StringBinary</item>
+                <item name="json" xsi:type="object">Morozov\PgCompat\Setup\Declaration\Schema\Db\PgSQL\Definition\Columns\Json</item>
+                <item name="datetime" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Timestamp</item>
+                <item name="timestamp" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Columns\Timestamp</item>
+                <item name="index" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Index</item>
+                <item name="unique" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Constraints\Internal</item>
+                <item name="primary" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Constraints\Internal</item>
+                <item name="constraint" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Constraints\Internal</item>
+                <item name="reference" xsi:type="object">Magento\Framework\Setup\Declaration\Schema\Db\MySQL\Definition\Constraints\ForeignKey</item>
+            </argument>
+        </arguments>
+    </type>
+</config>

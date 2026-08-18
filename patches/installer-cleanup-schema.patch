@@ -1,0 +1,23 @@
+--- a/setup/src/Magento/Setup/Model/Installer.php
++++ b/setup/src/Magento/Setup/Model/Installer.php
+@@ -1576,8 +1576,20 @@
+             if (!in_array($dbName, $cleanedUpDatabases)) {
+                 $this->log->log("Cleaning up database {$dbName}");
+-                $connection->query('DROP DATABASE IF EXISTS ' . $dbName);
+-                $connection->query('CREATE DATABASE IF NOT EXISTS ' . $dbName);
++                if (\Morozov\PgCompat\DB\DbEngine::isPostgres($config)) {
++                    // phpcs:ignore Magento2.SQL.RawQuery
++                    $connection->query("DROP SCHEMA IF EXISTS public CASCADE");
++                    // phpcs:ignore Magento2.SQL.RawQuery
++                    $connection->query("CREATE SCHEMA public");
++                    // phpcs:ignore Magento2.SQL.RawQuery
++                    $connection->query("GRANT ALL ON SCHEMA public TO PUBLIC");
++                } else {
++                    // phpcs:ignore Magento2.SQL.RawQuery
++                    $connection->query('DROP DATABASE IF EXISTS ' . $dbName);
++                    // phpcs:ignore Magento2.SQL.RawQuery
++                    $connection->query('CREATE DATABASE IF NOT EXISTS ' . $dbName);
++                }
+                 $cleanedUpDatabases[] = $dbName;
+             }
+         }

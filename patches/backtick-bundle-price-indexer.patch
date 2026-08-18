@@ -1,0 +1,19 @@
+--- a/app/code/Magento/Bundle/Model/ResourceModel/Indexer/Price.php
++++ b/app/code/Magento/Bundle/Model/ResourceModel/Indexer/Price.php
+@@ -740,8 +740,15 @@
+             $updateValues[] = sprintf("%s = VALUES(%s)", $column, $column);
+         }
+ 
++        // PgCompat: table name was hardcoded with literal MySQL backticks instead of
++        // quoteIdentifier() - besides being invalid Postgres syntax on its own, it also
++        // broke Postgres::rewriteOnDuplicateKey()'s table-name regex (which expects
++        // quoteIdentifier()'s normal output, "..." or unquoted, not `...`), so that
++        // rewrite silently fell through to just stripping ON DUPLICATE KEY UPDATE
++        // instead of translating it to ON CONFLICT.
+         $connection->query(sprintf(
+-            "INSERT INTO `" . $this->getBundleSelectionTable() . "` (%s) %s ON DUPLICATE KEY UPDATE %s",
++            "INSERT INTO " . $connection->quoteIdentifier($this->getBundleSelectionTable()) . " (%s) %s"
++                . " ON DUPLICATE KEY UPDATE %s",
+             implode(",", $insertColumns),
+             $query,
+             implode(",", $updateValues)

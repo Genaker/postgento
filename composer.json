@@ -1,0 +1,16 @@
+{
+    "name": "genaker/module-postgento",
+    "description": "PostgreSQL adapter for Magento Open Source and Mage-OS",
+    "type": "magento2-module",
+    "license": "Apache-2.0",
+    "require": {
+        "php": ">=8.2",
+        "magento/framework": "*"
+    },
+    "autoload": {
+        "files": ["registration.php"],
+        "psr-4": {
+            "Morozov\\PgCompat\\": ""
+        }
+    }
+}

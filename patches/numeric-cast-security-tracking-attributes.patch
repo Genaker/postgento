@@ -1,0 +1,17 @@
+--- a/app/code/Magento/Customer/Setup/Patch/Data/AddSecurityTrackingAttributes.php
++++ b/app/code/Magento/Customer/Setup/Patch/Data/AddSecurityTrackingAttributes.php
+@@ -89,9 +89,12 @@
+         );
+         $configTable = $this->moduleDataSetup->getTable('core_config_data');
+ 
++        // PgCompat: core_config_data.value is TEXT; MySQL implicitly casts a numeric
++        // string to a number for arithmetic operators, Postgres does not ("operator does
++        // not exist: text * integer"). castToNumeric() is ::numeric on Postgres and
++        // CAST(... AS DECIMAL) on MySQL.
+         $this->moduleDataSetup->getConnection()->update(
+             $configTable,
+-            ['value' => new \Zend_Db_Expr('value*24')],
++            ['value' => new \Zend_Db_Expr($this->moduleDataSetup->getConnection()->castToNumeric('value') . '*24')],
+             ['path = ?' => Customer::XML_PATH_CUSTOMER_RESET_PASSWORD_LINK_EXPIRATION_PERIOD]
+         );
+ 

@@ -1,0 +1,39 @@
+--- a/app/code/Magento/Catalog/Model/ResourceModel/MaxHeapTableSizeProcessor.php
++++ b/app/code/Magento/Catalog/Model/ResourceModel/MaxHeapTableSizeProcessor.php
+@@ -6,6 +6,7 @@
+ namespace Magento\Catalog\Model\ResourceModel;
+ 
+ use Magento\Framework\App\ResourceConnection;
++use Morozov\PgCompat\DB\Adapter\PostgresAdapterInterface;
+ 
+ /**
+  * @deprecated 101.0.3
+@@ -50,6 +51,18 @@
+      */
+     public function set($maxHeapTableSize = null)
+     {
++        // PgCompat: max_heap_table_size is a MySQL-only session tuning parameter with no
++        // Postgres equivalent concept - not just unsupported syntax, there is nothing to
++        // set. A no-op here (with a non-null sentinel so restore() below doesn't throw)
++        // is correct behavior, not a workaround. This isn't only hit via
++        // MaxHeapTableSizeProcessorOnFullReindex's plugin (which swallows all exceptions
++        // from this class) - a fresh install showed an uncaught call site too (Full.php),
++        // so both call paths need the guard, not just the one behind a try/catch.
++        if ($this->connection instanceof PostgresAdapterInterface) {
++            $this->currentMaxHeapTableSize = -1;
++            return;
++        }
++
+         $maxHeapTableSize = (int) (null === $maxHeapTableSize ? $this->defaultMaxHeapTableSie : $maxHeapTableSize);
+         if (!$maxHeapTableSize) {
+             throw new \InvalidArgumentException('Wrong max_heap_table_size parameter');
+@@ -74,6 +87,9 @@
+         if (null === $this->currentMaxHeapTableSize) {
+             throw new \RuntimeException('max_heap_table_size parameter is not set');
+         }
++        if ($this->connection instanceof PostgresAdapterInterface) {
++            return;
++        }
+         $this->connection->query('SET SESSION max_heap_table_size = ' . $this->currentMaxHeapTableSize);
+     }
+ }

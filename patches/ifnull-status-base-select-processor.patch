@@ -1,0 +1,14 @@
+--- a/app/code/Magento/Catalog/Model/ResourceModel/Product/StatusBaseSelectProcessor.php
++++ b/app/code/Magento/Catalog/Model/ResourceModel/Product/StatusBaseSelectProcessor.php
+@@ -76,7 +76,10 @@
+             []
+         );
+ 
+-        $select->where('IFNULL(status_attr.value, status_global_attr.value) = ?', Status::STATUS_ENABLED);
++        $select->where(
++            $select->getConnection()->getIfNullSql('status_attr.value', 'status_global_attr.value') . ' = ?',
++            Status::STATUS_ENABLED
++        );
+ 
+         return $select;
+     }
