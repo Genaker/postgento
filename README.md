@@ -14,17 +14,18 @@ Magento treats the database as a dumb InnoDB store plus a separate OpenSearch cl
 
 MySQL stays supported so existing shops don’t break. Postgres is the reason this module exists.
 
-## Mage-OS core PR (required for Magento SQL)
+## Core PRs (required for Magento SQL)
 
-Portable SQL does **not** belong in this module long-term. It is a core change:
+Portable SQL does **not** belong in this module long-term. It is a core change. The same change set is open on both distributions:
 
-**https://github.com/mage-os/mageos-magento2/pull/321**
+- **Mage-OS:** https://github.com/mage-os/mageos-magento2/pull/321
+- **Magento Open Source:** https://github.com/magento/magento2/pull/41129
 
-That PR adds `AdapterInterface` helpers (`getGroupConcatSql`, `getFieldSql`, `castToText`, `castToNumeric`, `createTableLike`, `createTemporaryTableFromSelect`) and replaces MySQL-only SQL at Magento call sites (`IFNULL`, backticks, `GROUP_CONCAT`, `FIELD()`, `UNION` casts, `ON DUPLICATE KEY` text, `UPDATE … LIMIT`, and so on).
+Those PRs add `AdapterInterface` helpers (`getGroupConcatSql`, `getFieldSql`, `castToText`, `castToNumeric`, `createTableLike`, `createTemporaryTableFromSelect`) and replace MySQL-only SQL at Magento call sites (`IFNULL`, backticks, `GROUP_CONCAT`, `FIELD()`, `UNION` casts, `ON DUPLICATE KEY` text, `UPDATE … LIMIT`, and so on). Magento `2.4-develop` already differs from Mage-OS in a few files; the Magento PR keeps Adobe’s versions of those files.
 
-### After #321 is merged
+### After a core PR is merged
 
-On **Mage-OS** (and any Magento tree that contains those commits):
+On **Mage-OS** or **Magento Open Source** (any tree that contains those commits):
 
 - **Do not apply** the Magento SQL patches under `patches/` that only rewrite core call sites.
 - Core already exposes the dialect helpers; this module only needs to implement them on the Postgres adapter (`DB\Adapter\Pdo\Postgres`).
@@ -32,9 +33,9 @@ On **Mage-OS** (and any Magento tree that contains those commits):
 
 You still install **this module** for the Postgres driver, declarative schema, installer `ConnectionFactory`, sequence `RETURNING` / `IDENTITY`, and related setup. A few installer/session patches listed below still apply.
 
-### Until #321 is merged
+### Until those PRs are merged
 
-On **raw Magento Open Source** and current Mage-OS `main`, you **must** apply the diffs in `patches/` (or check out the PR branch). Those files are the same changes as PR 321. `MysqlCompat` implements the new adapter methods so MySQL still works with those patches applied.
+On **raw Magento Open Source** and current Mage-OS `main`, you **must** apply the diffs in `patches/` (or check out a PR branch). Those files are the same call-site changes as Mage-OS #321 / Magento #41129. `MysqlCompat` implements the new adapter methods so MySQL still works with those patches applied.
 
 ## Using the patches (raw Magento, Mage-OS, Adobe)
 
@@ -89,10 +90,10 @@ List **every** file in `patches/` the same way (one extra.patches entry per file
 `composer create-project magento/project-community-edition` installs **split packages**. These patch files will not apply as-is (`app/code/Magento/Catalog/...` vs `vendor/magento/module-catalog/...`). Options:
 
 - Develop against a **git** Magento/Mage-OS checkout (above), or
-- Wait for Mage-OS #321 (then you only need the **module-only** patches, still git-path), or
+- Wait for Mage-OS #321 or Magento #41129 (then you only need the **module-only** patches, still git-path), or
 - Re-root each hunk onto `vendor/magento/module-*` / `vendor/magento/framework` / `vendor/magento/framework-setup` yourself.
 
-### 3. After #321 is in your core — keep only module patches
+### 3. After a core PR is in your tree — keep only module patches
 
 Skip the SQL call-site patches (IFNULL, GROUP_CONCAT, backticks, UNION casts, FIELD(), temp table, etc.). Still apply patches that talk to this module / Postgres setup:
 
@@ -108,7 +109,7 @@ Skip the SQL call-site patches (IFNULL, GROUP_CONCAT, backticks, UNION casts, FI
 | `show-variables-importexport-max-packet.patch` | No `max_allowed_packet` |
 | `show-variables-fixture-autoincrement.patch` | No `auto_increment_increment` |
 
-If a hunk is already in core (e.g. Mage-OS merged `setup-pass-db-engine`), skip that file.
+If a hunk is already in core (e.g. Mage-OS or Magento merged `setup-pass-db-engine`), skip that file.
 
 ## Install
 
@@ -156,7 +157,7 @@ Failed Postgres statements: `var/log/sqltopostgres.log`.
 ## Architecture (short)
 
 - `postgresql` / `postgres` / `pgsql` → `DB\Postgres` → `DB\Adapter\Pdo\Postgres` (`Zend_Db_Adapter_Pdo_Pgsql`). Does not extend Magento’s MySQL adapter.
-- `mysql` → Magento `Pdo\Mysql` (or `MysqlCompat` until #321 lands).
+- `mysql` → Magento `Pdo\Mysql` (or `MysqlCompat` until a core PR lands).
 
 ## Tests
 
