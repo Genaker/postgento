@@ -2,6 +2,18 @@
 
 This is a fork of Kirill Morozov’s Magento PostgreSQL compatibility module (`Morozov_PgCompat`). It is a PostgreSQL adapter for Magento Open Source / [Mage-OS](https://github.com/mage-os/mageos-magento2). Magento still runs on MySQL by default; this module adds a native Postgres engine selected from `env.php` (`db/connection/default/engine`).
 
+## Why Postgres instead of Magento’s MySQL
+
+Magento treats the database as a dumb InnoDB store plus a separate OpenSearch cluster. Postgres is a platform Magento can actually grow into:
+
+- **Search in the database** — [ParadeDB](https://www.paradedb.com/) (BM25 / `pg_search`) and `pg_trgm` / full text, instead of keeping Elasticsearch/OpenSearch as a mandatory second brain for catalog search.
+- **GIS** — [PostGIS](https://postgis.net/) for store locators, delivery zones, and geo inventory. MySQL’s spatial types are a thin afterthought.
+- **Procedures in real languages** — PL/pgSQL, PL/Python, PL/v8, SQL/PSM. Magento’s MySQL stored-routine story is `DELIMITER //` and pain.
+- **Extensions** — `citext`, `pg_trgm`, `pgvector`, `uuid-ossp`, foreign data wrappers, logical replication. Install an extension; don’t wait for a Magento module to reinvent it in PHP.
+- **Admin that isn’t MySQL Workbench / phpMyAdmin** — [pgAdmin](https://www.pgadmin.org/), `psql`, and a query planner you can read. Magento’s MySQL tooling is the 2009 LAMP leftover.
+
+MySQL stays supported so existing shops don’t break. Postgres is the reason this module exists.
+
 ## Mage-OS core PR (required for Magento SQL)
 
 Portable SQL does **not** belong in this module long-term. It is a core change:
