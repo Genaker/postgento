@@ -1,14 +1,6 @@
 --- a/app/code/Magento/ProductVideo/Model/Plugin/ExternalVideoResourceBackend.php
 +++ b/app/code/Magento/ProductVideo/Model/Plugin/ExternalVideoResourceBackend.php
-@@ -79,17 +79,22 @@
-                 ]
-             ),
-             []
-+        // PgCompat: was hardcoded MySQL backtick identifiers ('`value_video`.`provider`'
-+        // etc) passed as plain strings - getIfNullSql() just interpolates its arguments
-+        // verbatim, so these reached Postgres as literal, invalid backtick syntax
-+        // instead of going through quoteIdentifier(). Same bug, same fix, as the
-+        // core Gallery.php site this plugin's select is built from.
+@@ -83,16 +83,16 @@
          )->columns([
              'video_provider' => $originalResourceModel->getConnection()
 -                ->getIfNullSql('`value_video`.`provider`', '`default_value_video`.`provider`'),
